@@ -16,7 +16,3 @@ see `example` directory
 Minimal requirements: 
 - Implement Authenticator handler
 - Implement IRefreshTokenStorage 
-
-## LICENCE
-
-MIT
