@@ -189,10 +189,29 @@ func (m *GinMiddleware) LogoutHandler(c *gin.Context) {
 		return
 	}
 
+	// check expire
+	expire, err := claims.Get("expire")
+	if err != nil {
+		m.unauthorized(c, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	// check expire field
+	if time.Now().Unix() > int64(expire.(float64)) {
+		m.unauthorized(c, http.StatusUnauthorized, "access token expired")
+		return
+	}
+
 	// get refresh token
 	refreshToken, err := claims.Get("refresh_token")
 	if err != nil {
 		m.unauthorized(c, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	// check is refresh token was revoked
+	if m.RefreshTokenStorage.IsRevoked(refreshToken.(string)) {
+		m.unauthorized(c, http.StatusUnauthorized, "refresh token revoked")
 		return
 	}
 
