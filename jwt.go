@@ -27,7 +27,7 @@ type IRefreshTokenStorage interface {
 	// Delete refresh token from storage
 	Delete(token string) error
 	// Revoke refresh token
-	Revoke(token string) error
+	Revoke(token string, accessTokenTimeout time.Duration) error
 	// Check is token was revoked
 	IsRevoked(token string) bool
 }
@@ -218,6 +218,13 @@ func (m *GinMiddleware) LogoutHandler(c *gin.Context) {
 	err = m.RefreshTokenStorage.Delete(refreshToken.(string))
 	if err != nil {
 		m.unauthorized(c, http.StatusInternalServerError, "Unable to delete refresh token")
+		return
+	}
+
+	// revoke refresh token to avoid use existed access token
+	err = m.RefreshTokenStorage.Revoke(refreshToken.(string), m.Timeout)
+	if err != nil {
+		m.unauthorized(c, http.StatusInternalServerError, "Unable to revoke refresh token")
 		return
 	}
 

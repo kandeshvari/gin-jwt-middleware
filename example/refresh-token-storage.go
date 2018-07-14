@@ -43,7 +43,7 @@ func (ts *RefreshTokenStorage) Delete(token string) error {
 }
 
 // Revoke refresh token
-func (ts *RefreshTokenStorage) Revoke(token string) error {
+func (ts *RefreshTokenStorage) Revoke(token string, accessTokenTimeout time.Duration) error {
 	return nil
 }
 
