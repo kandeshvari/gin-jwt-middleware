@@ -1,10 +1,12 @@
 package main
 
 import (
-	"github.com/kandeshvari/gin-jwt-middleware"
-	"github.com/satori/go.uuid"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/kandeshvari/gin-jwt-middleware"
+	"github.com/satori/go.uuid"
 )
 
 type RefreshTokenStorage struct {
@@ -28,14 +30,24 @@ func (ts *RefreshTokenStorage) IsExpire(token string) bool {
 	return false
 }
 
-func (ts *RefreshTokenStorage) Update(token string, timeout time.Duration) error {
+func (ts *RefreshTokenStorage) Update(token string, refreshTimeout time.Duration, payload map[string]interface{}, c *gin.Context) error {
 	ts.rw.Lock()
-	ts.storage[token] = time.Now().Add(timeout).Unix()
+	ts.storage[token] = time.Now().Add(refreshTimeout).Unix()
 	ts.rw.Unlock()
 
 	return nil
 }
 
-func (ts *RefreshTokenStorage) Delete(token string) bool {
-	return true
+func (ts *RefreshTokenStorage) Delete(token string) error {
+	return nil
+}
+
+// Revoke refresh token
+func (ts *RefreshTokenStorage) Revoke(token string) error {
+	return nil
+}
+
+// Check is refresh token was revoked
+func (ts *RefreshTokenStorage) IsRevoked(token string) bool {
+	return false
 }

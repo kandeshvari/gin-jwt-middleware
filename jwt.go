@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/robbert229/jwt"
+	"reflect"
 )
 
 type Login struct {
@@ -21,9 +23,13 @@ type IRefreshTokenStorage interface {
 	// Call to check is refresh token already expired
 	IsExpire(token string) bool
 	// Add/Update refresh token in
-	Update(token string, timeout time.Duration) error
+	Update(token string, timeout time.Duration, payload map[string]interface{}, c *gin.Context) error
 	// Delete refresh token from storage
-	Delete(token string) bool
+	Delete(token string) error
+	// Revoke refresh token
+	Revoke(token string) error
+	// Check is token was revoked
+	IsRevoked(token string) bool
 }
 
 type GinMiddleware struct {
@@ -113,12 +119,12 @@ func ExtractPayload(c *gin.Context) map[string]interface{} {
 }
 
 // Generate new access token and send it to client
-func (m *GinMiddleware) IssueAccessToken(refreshToken string, payload interface{}, c *gin.Context) {
+func (m *GinMiddleware) IssueAccessToken(refreshToken string, payload map[string]interface{}, c *gin.Context) {
 	// and issue new token
 	claims := jwt.NewClaim()
 	claims.Set("payload", payload)
 	claims.Set("refresh_token", refreshToken)
-	err := m.RefreshTokenStorage.Update(refreshToken, m.RefreshTimeout)
+	err := m.RefreshTokenStorage.Update(refreshToken, m.RefreshTimeout, payload, c)
 	if err != nil {
 		m.unauthorized(c, http.StatusInternalServerError, "Refresh Token update failed")
 		return
@@ -158,7 +164,7 @@ func (m *GinMiddleware) RefreshHandler(c *gin.Context) {
 	}
 
 	// check refresh timeout field
-	if m.RefreshTokenStorage.IsExpire(refreshToken.(string)) {
+	if !m.RefreshTokenStorage.IsExpire(refreshToken.(string)) {
 		//if time.Now().Unix() > tokenStorage[refreshToken.(string)] {
 		m.unauthorized(c, http.StatusUnauthorized, "refresh token expired")
 		return
@@ -171,7 +177,34 @@ func (m *GinMiddleware) RefreshHandler(c *gin.Context) {
 		return
 	}
 
-	m.IssueAccessToken(refreshToken.(string), payload, c)
+	m.IssueAccessToken(refreshToken.(string), payload.(map[string]interface{}), c)
+}
+
+// Handler for logout action
+func (m *GinMiddleware) LogoutHandler(c *gin.Context) {
+	// retrieve claims from token
+	claims, err := m.getClaims(c)
+	if err != nil {
+		m.unauthorized(c, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	// get refresh token
+	refreshToken, err := claims.Get("refresh_token")
+	if err != nil {
+		m.unauthorized(c, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	err = m.RefreshTokenStorage.Delete(refreshToken.(string))
+	if err != nil {
+		m.unauthorized(c, http.StatusInternalServerError, "Unable to delete refresh token")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status": "Ok",
+	})
 }
 
 // Handler for login action
@@ -203,7 +236,12 @@ func (m *GinMiddleware) LoginHandler(c *gin.Context) {
 		m.unauthorized(c, http.StatusInternalServerError, "Unable to issue refresh token")
 		return
 	}
-	m.IssueAccessToken(refreshToken, userID, c)
+	payload, err := toMap(userID, "json")
+	if err != nil {
+		m.unauthorized(c, http.StatusInternalServerError, "Unable to convert payload")
+		return
+	}
+	m.IssueAccessToken(refreshToken, payload, c)
 }
 
 /* Internal functions */
@@ -228,6 +266,17 @@ func (m *GinMiddleware) middlewareImpl(c *gin.Context) {
 	// check expire field
 	if time.Now().Unix() > int64(expire.(float64)) {
 		m.unauthorized(c, http.StatusUnauthorized, "token expired")
+		return
+	}
+
+	// check is refresh token was revoked
+	refreshToken, err := claims.Get("refresh_token")
+	if err != nil {
+		m.unauthorized(c, http.StatusUnauthorized, "invalid refresh token")
+		return
+	}
+	if m.RefreshTokenStorage.IsRevoked(refreshToken.(string)) {
+		m.unauthorized(c, http.StatusUnauthorized, "refresh token revoked")
 		return
 	}
 
@@ -260,6 +309,11 @@ func (m *GinMiddleware) getClaims(c *gin.Context) (*jwt.Claims, error) {
 		return nil, errors.New("invalid auth header")
 	}
 
+	err := m.Algorithm.Validate(parts[1])
+	if err != nil {
+		return nil, errors.New("invalid token")
+	}
+
 	claims, err := m.Algorithm.Decode(parts[1])
 	if err != nil {
 		return nil, errors.New("cant decode auth header")
@@ -273,4 +327,30 @@ func (m *GinMiddleware) unauthorized(c *gin.Context, code int, message string) {
 	c.Abort()
 	m.Unauthorized(c, code, message)
 	return
+}
+
+// Helper: convert payload struct to map
+func toMap(in interface{}, tag string) (map[string]interface{}, error) {
+	out := make(map[string]interface{})
+
+	v := reflect.ValueOf(in)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	// we only accept structs
+	if v.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("toMap only accepts structs; got %T", v)
+	}
+
+	typ := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		// gets us a StructField
+		fi := typ.Field(i)
+		if tagv := fi.Tag.Get(tag); tagv != "" {
+			// set key of map to value in struct field
+			out[tagv] = v.Field(i).Interface()
+		}
+	}
+	return out, nil
 }
