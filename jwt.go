@@ -21,7 +21,7 @@ type Login struct {
 type IRefreshTokenStorage interface {
 	Issue() (string, error)
 	// Call to check is refresh token already expired
-	IsExpire(token string) bool
+	IsExpired(token string) bool
 	// Add/Update refresh token in
 	Update(token string, timeout time.Duration, payload map[string]interface{}, c *gin.Context) error
 	// Delete refresh token from storage
@@ -164,8 +164,8 @@ func (m *GinMiddleware) RefreshHandler(c *gin.Context) {
 	}
 
 	// check refresh timeout field
-	if !m.RefreshTokenStorage.IsExpire(refreshToken.(string)) {
-		//if time.Now().Unix() > tokenStorage[refreshToken.(string)] {
+	if m.RefreshTokenStorage.IsExpired(refreshToken.(string)) {
+		m.RefreshTokenStorage.Delete(refreshToken.(string))
 		m.unauthorized(c, http.StatusUnauthorized, "refresh token expired")
 		return
 	}
